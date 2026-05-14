@@ -27,8 +27,7 @@ def test_shift_metrics() -> None:
 
 
 def test_break_status_thresholds() -> None:
-    assert break_status(239)["level"] == "ok"
-    assert break_status(240)["suggested_minutes"] == 15
-    assert break_status(360)["suggested_minutes"] == 30
+    assert break_status(79)["level"] == "ok"
+    assert break_status(80)["suggested_minutes"] == 15
+    assert break_status(160)["level"] == "due"
     assert break_status(480)["level"] == "warning"
-

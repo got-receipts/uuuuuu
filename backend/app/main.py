@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.models import User
-from app.routers import auth, reports, shifts
+from app.routers import auth, locations, reports, shifts
 from app.schemas import UserRead
 from app.security import get_current_user
 
@@ -34,6 +34,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(shifts.router)
 app.include_router(reports.router)
+app.include_router(locations.router)
 
 
 @app.get("/health")

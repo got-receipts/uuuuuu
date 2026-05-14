@@ -1,11 +1,13 @@
 import 'dart:convert';
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
 
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const apiBaseUrl = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://localhost:8000');
 const disclaimer =
@@ -252,6 +254,7 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final pages = [
       DashboardPage(api: widget.api, refreshTick: refreshTick, onChanged: refresh),
+      ZonesPage(api: widget.api),
       WeeklyPage(api: widget.api, refreshTick: refreshTick),
       SettingsPage(user: widget.user, onLogout: widget.onLogout),
       const PrivacyPage(),
@@ -263,6 +266,7 @@ class _HomeShellState extends State<HomeShell> {
         onDestinationSelected: (value) => setState(() => index = value),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Home'),
+          NavigationDestination(icon: Icon(Icons.map_outlined), selectedIcon: Icon(Icons.map), label: 'Zones'),
           NavigationDestination(icon: Icon(Icons.query_stats), label: 'Reports'),
           NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Settings'),
           NavigationDestination(icon: Icon(Icons.privacy_tip_outlined), label: 'Privacy'),
@@ -399,9 +403,18 @@ class ActiveShiftCard extends StatelessWidget {
   final Map<String, dynamic> shift;
   final VoidCallback onChanged;
 
-  Future<void> startBreak() async {
-    await api.request('POST', '/shifts/${shift['id']}/breaks/start', body: {'break_type': 'rest'});
-    onChanged();
+  Future<void> startBreak(BuildContext context) async {
+    final summary = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => ShiftSummaryDialog(shift: shift),
+    );
+    if (summary == null) return;
+    await api.request('PATCH', '/shifts/${shift['id']}', body: summary);
+    if (!context.mounted) return;
+    final result = await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => BreakGuidePage(api: api, shift: {...shift, ...summary})),
+    );
+    if (result != null) onChanged();
   }
 
   Future<void> endBreak(int id) async {
@@ -421,14 +434,14 @@ class ActiveShiftCard extends StatelessWidget {
           children: [
             Text('Active Shift', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
-            Text('${shift['platform']} · ${shift['metrics']['total_minutes']} minutes online'),
+            Text('${shift['platform']} - ${shift['metrics']['total_minutes']} minutes online'),
             const SizedBox(height: 10),
             Text(shift['break_status']['message'], style: const TextStyle(color: Color(0xfffdb022))),
             const SizedBox(height: 12),
             OutlinedButton.icon(
-              onPressed: activeBreak == null ? startBreak : () => endBreak(activeBreak['id'] as int),
+              onPressed: activeBreak == null ? () => startBreak(context) : () => endBreak(activeBreak['id'] as int),
               icon: Icon(activeBreak == null ? Icons.free_breakfast_outlined : Icons.timer_off_outlined),
-              label: Text(activeBreak == null ? 'Log Break Start' : 'End Active Break'),
+              label: Text(activeBreak == null ? 'Find Break Zone' : 'End Active Break'),
             ),
           ],
         ),
@@ -543,6 +556,321 @@ class _ShiftFormPageState extends State<ShiftFormPage> {
   }
 }
 
+class ShiftSummaryDialog extends StatefulWidget {
+  const ShiftSummaryDialog({super.key, required this.shift});
+  final Map<String, dynamic> shift;
+
+  @override
+  State<ShiftSummaryDialog> createState() => _ShiftSummaryDialogState();
+}
+
+class _ShiftSummaryDialogState extends State<ShiftSummaryDialog> {
+  late final TextEditingController gross;
+  late final TextEditingController tips;
+  late final TextEditingController trips;
+  late final TextEditingController miles;
+  late final TextEditingController active;
+
+  @override
+  void initState() {
+    super.initState();
+    gross = TextEditingController(text: widget.shift['gross_earnings']?.toString() ?? '0');
+    tips = TextEditingController(text: widget.shift['tips']?.toString() ?? '0');
+    trips = TextEditingController(text: widget.shift['trips']?.toString() ?? '0');
+    miles = TextEditingController(text: widget.shift['miles']?.toString() ?? '0');
+    active = TextEditingController(text: widget.shift['active_minutes']?.toString() ?? '0');
+  }
+
+  @override
+  void dispose() {
+    gross.dispose();
+    tips.dispose();
+    trips.dispose();
+    miles.dispose();
+    active.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('${widget.shift['platform']} summary'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Field(controller: gross, label: 'Gross earnings so far', icon: Icons.attach_money),
+            Field(controller: tips, label: 'Tips so far', icon: Icons.volunteer_activism_outlined),
+            Field(controller: trips, label: 'Trips completed', icon: Icons.local_shipping_outlined),
+            Field(controller: miles, label: 'Miles driven', icon: Icons.route_outlined),
+            Field(controller: active, label: 'Active minutes', icon: Icons.timer_outlined),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop({
+            'platform': widget.shift['platform'],
+            'gross_earnings': parse(gross.text),
+            'tips': parse(tips.text),
+            'trips': int.tryParse(trips.text) ?? 0,
+            'miles': parse(miles.text),
+            'active_minutes': int.tryParse(active.text) ?? 0,
+          }),
+          child: const Text('Continue'),
+        ),
+      ],
+    );
+  }
+}
+
+class BreakGuidePage extends StatefulWidget {
+  const BreakGuidePage({super.key, required this.api, required this.shift});
+  final ApiClient api;
+  final Map<String, dynamic> shift;
+
+  @override
+  State<BreakGuidePage> createState() => _BreakGuidePageState();
+}
+
+class _BreakGuidePageState extends State<BreakGuidePage> {
+  GeoPoint? location;
+  List<dynamic> zones = [];
+  List<dynamic> hotspots = [];
+  bool loading = true;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      location = await currentLocation();
+      final breakData = await widget.api.request('GET', '/locations/break-zones?lat=${location!.lat}&lon=${location!.lon}') as Map<String, dynamic>;
+      final activityData = await widget.api.request('GET', '/locations/activity?lat=${location!.lat}&lon=${location!.lon}') as Map<String, dynamic>;
+      zones = breakData['zones'] as List<dynamic>;
+      hotspots = activityData['hotspots'] as List<dynamic>;
+    } catch (err) {
+      error = err.toString().replaceFirst('Exception: ', '');
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> confirmBreak(Map<String, dynamic> zone) async {
+    final here = await currentLocation();
+    await widget.api.request('POST', '/shifts/${widget.shift['id']}/breaks/start', body: {
+      'break_type': 'rest',
+      'location_name': zone['name'],
+      'latitude': here.lat,
+      'longitude': here.lon,
+      'target_latitude': zone['latitude'],
+      'target_longitude': zone['longitude'],
+      'notes': 'Geo-confirmed break at ${zone['name']}',
+    });
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Break Zones')),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                if (location != null) DataMap(origin: location!, zones: zones, hotspots: hotspots),
+                const SizedBox(height: 16),
+                Text('Closest break locations', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 10),
+                ...zones.map((zone) => ZoneTile(zone: zone as Map<String, dynamic>, onConfirm: () => confirmBreak(zone))),
+                if (zones.isEmpty) const Text('No 24-hour break locations found nearby. Try refreshing after moving closer to a commercial area.'),
+              ],
+            ),
+    );
+  }
+}
+
+class ZonesPage extends StatefulWidget {
+  const ZonesPage({super.key, required this.api});
+  final ApiClient api;
+
+  @override
+  State<ZonesPage> createState() => _ZonesPageState();
+}
+
+class _ZonesPageState extends State<ZonesPage> {
+  GeoPoint? location;
+  List<dynamic> zones = [];
+  List<dynamic> hotspots = [];
+  bool loading = false;
+  String? error;
+
+  Future<void> load() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      location = await currentLocation();
+      final breakData = await widget.api.request('GET', '/locations/break-zones?lat=${location!.lat}&lon=${location!.lon}') as Map<String, dynamic>;
+      final activityData = await widget.api.request('GET', '/locations/activity?lat=${location!.lat}&lon=${location!.lon}') as Map<String, dynamic>;
+      zones = breakData['zones'] as List<dynamic>;
+      hotspots = activityData['hotspots'] as List<dynamic>;
+    } catch (err) {
+      error = err.toString().replaceFirst('Exception: ', '');
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Hot Zones')),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          FilledButton.icon(
+            onPressed: loading ? null : load,
+            icon: const Icon(Icons.my_location),
+            label: Text(loading ? 'Locating...' : 'Use My Location'),
+          ),
+          const SizedBox(height: 12),
+          const Text('Activity is estimated from public restaurant, cafe, convenience, and retail POI density. It is not Uber or delivery-platform order data.', style: TextStyle(color: Color(0xff98a2b3), height: 1.35)),
+          const SizedBox(height: 16),
+          if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          if (location != null) DataMap(origin: location!, zones: zones, hotspots: hotspots),
+          const SizedBox(height: 16),
+          Text('24-hour break spots', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 10),
+          ...zones.map((zone) => ZoneTile(zone: zone as Map<String, dynamic>, onConfirm: null)),
+        ],
+      ),
+    );
+  }
+}
+
+class DataMap extends StatelessWidget {
+  const DataMap({super.key, required this.origin, required this.zones, required this.hotspots});
+  final GeoPoint origin;
+  final List<dynamic> zones;
+  final List<dynamic> hotspots;
+
+  @override
+  Widget build(BuildContext context) {
+    return AspectRatio(
+      aspectRatio: 1.25,
+      child: Card(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: CustomPaint(painter: MapGridPainter()),
+            ),
+            const Center(child: Icon(Icons.navigation, color: Colors.white, size: 30)),
+            ...hotspots.take(10).map((item) => MapDot(origin: origin, item: item as Map<String, dynamic>, color: const Color(0x99fdb022), size: (18 + parse(item['score']).clamp(0, 16)).toDouble())),
+            ...zones.take(8).map((item) => MapDot(origin: origin, item: item as Map<String, dynamic>, color: const Color(0xff32d583), size: 14)),
+            const Positioned(left: 12, bottom: 12, child: Text('Open POI heat map', style: TextStyle(color: Color(0xff98a2b3)))),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class MapDot extends StatelessWidget {
+  const MapDot({super.key, required this.origin, required this.item, required this.color, required this.size});
+  final GeoPoint origin;
+  final Map<String, dynamic> item;
+  final Color color;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final latDelta = (parse(item['latitude']) - origin.lat).clamp(-0.025, 0.025);
+    final lonDelta = (parse(item['longitude']) - origin.lon).clamp(-0.025, 0.025);
+    final x = 0.5 + lonDelta / 0.05;
+    final y = 0.5 - latDelta / 0.05;
+    return Positioned(
+      left: x * (MediaQuery.of(context).size.width - 64),
+      top: y * ((MediaQuery.of(context).size.width - 32) / 1.25 - 24),
+      child: Tooltip(
+        message: item['name']?.toString() ?? item['label']?.toString() ?? 'Map point',
+        child: Container(width: size, height: size, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      ),
+    );
+  }
+}
+
+class MapGridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xff26313a)
+      ..strokeWidth = 1;
+    for (var i = 1; i < 5; i++) {
+      canvas.drawLine(Offset(size.width * i / 5, 0), Offset(size.width * i / 5, size.height), paint);
+      canvas.drawLine(Offset(0, size.height * i / 5), Offset(size.width, size.height * i / 5), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class ZoneTile extends StatelessWidget {
+  const ZoneTile({super.key, required this.zone, required this.onConfirm});
+  final Map<String, dynamic> zone;
+  final VoidCallback? onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        leading: Icon(zone['open_24_7'] == true ? Icons.local_gas_station : Icons.place_outlined, color: const Color(0xff32d583)),
+        title: Text(zone['name']?.toString() ?? 'Break location'),
+        subtitle: Text('${zone['distance_miles']} mi - ${zone['kind']} ${zone['open_24_7'] == true ? '- 24/7' : ''}'),
+        trailing: onConfirm == null ? const Icon(Icons.chevron_right) : FilledButton(onPressed: onConfirm, child: const Text("I'm here")),
+        onTap: () async {
+          final url = Uri.parse('https://www.openstreetmap.org/?mlat=${zone['latitude']}&mlon=${zone['longitude']}#map=17/${zone['latitude']}/${zone['longitude']}');
+          await launchUrl(url, mode: LaunchMode.externalApplication);
+        },
+      ),
+    );
+  }
+}
+
+class GeoPoint {
+  GeoPoint(this.lat, this.lon);
+  final double lat;
+  final double lon;
+}
+
+Future<GeoPoint> currentLocation() async {
+  final enabled = await Geolocator.isLocationServiceEnabled();
+  if (!enabled) {
+    throw Exception('Location services are disabled');
+  }
+  var permission = await Geolocator.checkPermission();
+  if (permission == LocationPermission.denied) {
+    permission = await Geolocator.requestPermission();
+  }
+  if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+    throw Exception('Location permission is required for break-zone guidance');
+  }
+  final position = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.high));
+  return GeoPoint(position.latitude, position.longitude);
+}
+
 class WeeklyPage extends StatefulWidget {
   const WeeklyPage({super.key, required this.api, required this.refreshTick});
   final ApiClient api;
@@ -612,12 +940,10 @@ class _WeeklyPageState extends State<WeeklyPage> {
       }
       return;
     }
-    final blob = html.Blob([response.body], 'text/csv');
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    html.AnchorElement(href: url)
-      ..download = 'gigos-shifts.csv'
-      ..click();
-    html.Url.revokeObjectUrl(url);
+    await Share.shareXFiles(
+      [XFile.fromData(response.bodyBytes, mimeType: 'text/csv', name: 'gigos-shifts.csv')],
+      text: 'GigOS shift export',
+    );
   }
 }
 
@@ -690,13 +1016,13 @@ class MetricCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Icon(icon, color: const Color(0xff32d583)),
+              Center(child: Icon(icon, color: const Color(0xff32d583))),
               const SizedBox(height: 12),
-              Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              Text(value, textAlign: TextAlign.center, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
               const SizedBox(height: 3),
-              Text(label, style: const TextStyle(color: Color(0xff98a2b3))),
+              Text(label, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xff98a2b3))),
             ],
           ),
         ),

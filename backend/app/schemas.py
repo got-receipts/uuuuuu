@@ -67,6 +67,11 @@ class BreakStart(BaseModel):
     break_type: str = "rest"
     started_at: datetime | None = None
     notes: str | None = None
+    location_name: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    target_latitude: Decimal | None = None
+    target_longitude: Decimal | None = None
 
 
 class BreakEnd(BaseModel):
@@ -81,6 +86,10 @@ class BreakRead(BaseModel):
     ended_at: datetime | None
     break_type: str
     notes: str | None
+    location_name: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    confirmed_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -99,6 +108,7 @@ class BreakStatus(BaseModel):
     level: str
     message: str
     suggested_minutes: int
+    next_due_minutes: int | None = None
 
 
 class ShiftRead(BaseModel):

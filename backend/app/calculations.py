@@ -3,6 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 TAX_RATE = Decimal("0.20")
 MAINTENANCE_PER_MILE = Decimal("0.15")
+BREAK_INTERVAL_MINUTES = 80
 
 
 def money(value: Decimal | float | int) -> Decimal:
@@ -49,9 +50,13 @@ def metrics(
 def break_status(minutes: int) -> dict[str, str | int]:
     if minutes >= 8 * 60:
         return {"level": "warning", "message": "Fatigue warning: consider ending your shift or taking a recovery break.", "suggested_minutes": 30}
-    if minutes >= 6 * 60:
-        return {"level": "due", "message": "You have been online 6+ hours. Log a 30 minute break when you can.", "suggested_minutes": 30}
-    if minutes >= 4 * 60:
-        return {"level": "suggested", "message": "You have been online 4+ hours. A 15 minute break is recommended.", "suggested_minutes": 15}
-    return {"level": "ok", "message": "Break status looks good.", "suggested_minutes": 0}
-
+    if minutes >= BREAK_INTERVAL_MINUTES:
+        intervals = minutes // BREAK_INTERVAL_MINUTES
+        next_due = (intervals + 1) * BREAK_INTERVAL_MINUTES
+        return {
+            "level": "due",
+            "message": "Break companion: take a break now and confirm arrival at a nearby safe break location.",
+            "suggested_minutes": 15,
+            "next_due_minutes": next_due,
+        }
+    return {"level": "ok", "message": f"Next break check at {BREAK_INTERVAL_MINUTES} minutes online.", "suggested_minutes": 0, "next_due_minutes": BREAK_INTERVAL_MINUTES}

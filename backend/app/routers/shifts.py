@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.calculations import break_status, metrics, total_minutes
 from app.database import get_db
+from app.geo import miles_between
 from app.models import Break, Shift, User
 from app.schemas import BreakEnd, BreakRead, BreakStart, ShiftCreate, ShiftEnd, ShiftRead, ShiftStart, ShiftUpdate
 from app.security import get_current_user
@@ -150,11 +151,26 @@ def start_break(shift_id: int, payload: BreakStart, db: Session = Depends(get_db
     active_break = db.scalar(select(Break).where(Break.shift_id == shift_id, Break.ended_at.is_(None)))
     if active_break:
         raise HTTPException(status_code=409, detail="This shift already has an active break")
+    if payload.target_latitude is not None and payload.target_longitude is not None:
+        if payload.latitude is None or payload.longitude is None:
+            raise HTTPException(status_code=400, detail="Current location is required to confirm a break zone")
+        distance = miles_between(
+            float(payload.latitude),
+            float(payload.longitude),
+            float(payload.target_latitude),
+            float(payload.target_longitude),
+        )
+        if distance > 0.2:
+            raise HTTPException(status_code=409, detail="Arrive within 0.2 miles of the selected break zone to start the timer")
     break_item = Break(
         shift_id=shift_id,
-        started_at=payload.started_at or now_utc(),
+        started_at=now_utc() if payload.target_latitude is not None else payload.started_at or now_utc(),
         break_type=payload.break_type,
         notes=payload.notes,
+        location_name=payload.location_name,
+        latitude=payload.latitude or payload.target_latitude,
+        longitude=payload.longitude or payload.target_longitude,
+        confirmed_at=now_utc() if payload.target_latitude is not None else None,
     )
     db.add(break_item)
     db.commit()

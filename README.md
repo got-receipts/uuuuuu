@@ -83,6 +83,18 @@ CORS_ORIGINS=https://your-railway-domain.up.railway.app
 
 The root Dockerfile builds Flutter Web to `build/web`, copies it into the FastAPI image, runs migrations, and serves the PWA and API from the same Railway service. The healthcheck path is `/health`.
 
+## iPhone PWA Install
+
+This repo is currently set up for the fastest iPhone path: install the Railway-hosted Flutter Web app as a Safari PWA.
+
+1. Deploy GigOS to Railway.
+2. Open the Railway app URL in Safari on the iPhone.
+3. Tap the Safari share button.
+4. Tap **Add to Home Screen**.
+5. Launch GigOS from the new home-screen icon.
+
+The frontend includes a web manifest, Apple mobile web app tags, theme color, and app icons. Location features require HTTPS, which Railway provides on deployed services.
+
 If you deploy frontend and backend as separate services later, build `frontend/Dockerfile` with:
 
 ```text
@@ -119,9 +131,14 @@ API_BASE_URL=https://your-backend-domain
 
 Break companion thresholds:
 
-- 4 hours: suggest a 15 minute break
-- 6 hours: suggest a 30 minute break
+- Every 80 minutes: prompt for a geo-confirmed break
 - 8 hours: fatigue warning
+
+Location intelligence:
+
+- `GET /locations/break-zones` uses public OpenStreetMap Overpass POI data to find nearby 24-hour fuel/convenience locations and other rest stops.
+- `GET /locations/activity` estimates hot zones from public restaurant, cafe, convenience, supermarket, and retail POI density.
+- These are open-data estimates, not Uber, DoorDash, Grubhub, Instacart, Amazon Flex, or delivery-platform order metrics.
 
 ## Security Notes
 
@@ -149,4 +166,3 @@ flutter pub get
 flutter analyze
 flutter build web --release --dart-define=API_BASE_URL=http://localhost:8000
 ```
-
