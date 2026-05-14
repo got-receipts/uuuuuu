@@ -1,6 +1,6 @@
 FROM ghcr.io/cirruslabs/flutter:stable AS frontend-build
 WORKDIR /frontend
-ARG API_BASE_URL=/api
+ARG API_BASE_URL=
 COPY frontend/pubspec.yaml frontend/analysis_options.yaml ./
 RUN flutter pub get
 COPY frontend/ .
@@ -20,4 +20,3 @@ COPY --from=frontend-build /frontend/build/web /app/static
 ENV PORT=8000
 EXPOSE 8000
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
-

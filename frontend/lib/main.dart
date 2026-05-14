@@ -32,7 +32,7 @@ class GigOSApp extends StatelessWidget {
         useMaterial3: true,
         colorScheme: scheme,
         scaffoldBackgroundColor: const Color(0xff101418),
-        cardTheme: const CardTheme(
+        cardTheme: const CardThemeData(
           color: Color(0xff171d23),
           elevation: 0,
           margin: EdgeInsets.zero,
