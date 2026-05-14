@@ -7,8 +7,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
+from app.database import SessionLocal
+from app.demo_seed import seed_demo_data
 from app.models import User
-from app.routers import auth, locations, reports, shifts
+from app.routers import auth, locations, reports, shifts, vehicles
 from app.schemas import UserRead
 from app.security import get_current_user
 
@@ -35,6 +37,16 @@ app.include_router(auth.router)
 app.include_router(shifts.router)
 app.include_router(reports.router)
 app.include_router(locations.router)
+app.include_router(vehicles.router)
+
+
+@app.on_event("startup")
+def startup_seed() -> None:
+    db = SessionLocal()
+    try:
+        seed_demo_data(db)
+    finally:
+        db.close()
 
 
 @app.get("/health")

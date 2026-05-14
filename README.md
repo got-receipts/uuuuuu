@@ -104,6 +104,11 @@ The frontend includes a web manifest, Apple mobile web app tags, theme color, an
 - `GET /export/csv`
 - `GET /locations/break-zones`
 - `GET /locations/activity`
+- `GET /vehicles/catalog`
+- `GET /vehicles`
+- `GET /vehicles/active`
+- `POST /vehicles`
+- `PATCH /vehicles/{id}/active`
 - `GET /health`
 
 ## Calculation Rules
@@ -126,6 +131,13 @@ Location intelligence:
 - `GET /locations/break-zones` uses public OpenStreetMap Overpass POI data to find nearby 24-hour fuel/convenience locations and other rest stops.
 - `GET /locations/activity` estimates hot zones from public restaurant, cafe, convenience, supermarket, and retail POI density.
 - These are open-data estimates, not Uber, DoorDash, Grubhub, Instacart, Amazon Flex, or delivery-platform order metrics.
+
+Vehicle profile:
+
+- GigOS seeds a common-vehicle MPG catalog at startup.
+- Drivers can add a catalog vehicle and set fuel price per gallon.
+- Only one vehicle can be active per user.
+- New shifts attach the active vehicle and can estimate gas cost from `miles / mpg_combined * fuel_price_per_gallon` when manual gas cost is not entered.
 
 ## Security Notes
 

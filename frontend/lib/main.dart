@@ -78,6 +78,24 @@ class ApiClient {
   }
 }
 
+class LogoBadge extends StatelessWidget {
+  const LogoBadge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xff32d583),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: const [BoxShadow(color: Color(0x5532d583), blurRadius: 12)],
+      ),
+      child: const Center(
+        child: Text('G', style: TextStyle(color: Color(0xff101418), fontWeight: FontWeight.w900, fontSize: 20)),
+      ),
+    );
+  }
+}
+
 class AppRoot extends StatefulWidget {
   const AppRoot({super.key});
 
@@ -254,7 +272,7 @@ class _HomeShellState extends State<HomeShell> {
       DashboardPage(api: widget.api, refreshTick: refreshTick, onChanged: refresh),
       ZonesPage(api: widget.api),
       WeeklyPage(api: widget.api, refreshTick: refreshTick),
-      SettingsPage(user: widget.user, onLogout: widget.onLogout),
+      SettingsPage(user: widget.user, api: widget.api, onLogout: widget.onLogout),
       const PrivacyPage(),
     ];
     return Scaffold(
@@ -286,6 +304,7 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   List<dynamic> shifts = [];
+  Map<String, dynamic>? activeVehicle;
   bool loading = true;
   String? error;
 
@@ -305,6 +324,7 @@ class _DashboardPageState extends State<DashboardPage> {
     setState(() => loading = true);
     try {
       shifts = await widget.api.request('GET', '/shifts') as List<dynamic>;
+      activeVehicle = await widget.api.request('GET', '/vehicles/active') as Map<String, dynamic>?;
       error = null;
     } catch (err) {
       error = err.toString();
@@ -320,6 +340,13 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> startShift() async {
+    if (activeVehicle == null) {
+      final vehicle = await Navigator.of(context).push<Map<String, dynamic>>(
+        MaterialPageRoute(builder: (_) => VehicleSetupPage(api: widget.api)),
+      );
+      if (vehicle == null) return;
+      activeVehicle = vehicle;
+    }
     final platform = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => PlatformPicker(),
@@ -330,6 +357,18 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> endShift(Map<String, dynamic> shift) async {
+    final complete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('End shift completely?'),
+        content: const Text('Choose yes only when you are done for this shift. If you are just pausing, keep the shift open and use a break type instead.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Not yet')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Yes, final tally')),
+        ],
+      ),
+    );
+    if (complete != true) return;
     final result = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(builder: (_) => ShiftFormPage(api: widget.api, shift: shift, endMode: true)),
     );
@@ -345,25 +384,44 @@ class _DashboardPageState extends State<DashboardPage> {
     final weekMiles = sumField(shifts, 'miles');
 
     return Scaffold(
-      appBar: AppBar(title: const Text('GigOS'), actions: [IconButton(onPressed: load, icon: const Icon(Icons.refresh))]),
+      appBar: AppBar(
+        leading: const Padding(padding: EdgeInsets.all(8), child: LogoBadge()),
+        title: const Text('GigOS'),
+        actions: [IconButton(onPressed: load, icon: const Icon(Icons.refresh))],
+      ),
       body: RefreshIndicator(
         onRefresh: load,
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
             if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            FilledButton.icon(
-              onPressed: active == null ? startShift : () => endShift(active),
-              icon: Icon(active == null ? Icons.play_arrow : Icons.stop),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(64),
-                backgroundColor: active == null ? const Color(0xff32d583) : const Color(0xfff97066),
-                foregroundColor: const Color(0xff101418),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              child: FilledButton.icon(
+                key: ValueKey(active == null ? 'off' : 'on'),
+                onPressed: active == null ? startShift : () => endShift(active),
+                icon: Icon(active == null ? Icons.play_arrow : Icons.stop),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(64),
+                  backgroundColor: active == null ? const Color(0xff32d583) : const Color(0xfff97066),
+                  foregroundColor: const Color(0xff101418),
+                ),
+                label: Text(active == null ? 'Start Shift' : 'Clock Out', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
               ),
-              label: Text(active == null ? 'Start Shift' : 'End Shift', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
             ),
             const SizedBox(height: 16),
             if (active != null) ActiveShiftCard(api: widget.api, shift: active, onChanged: widget.onChanged),
+            if (activeVehicle == null) ...[
+              const SizedBox(height: 16),
+              SetupPromptCard(
+                onTap: () async {
+                  final vehicle = await Navigator.of(context).push<Map<String, dynamic>>(
+                    MaterialPageRoute(builder: (_) => VehicleSetupPage(api: widget.api)),
+                  );
+                  if (vehicle != null) setState(() => activeVehicle = vehicle);
+                },
+              ),
+            ],
             const SizedBox(height: 16),
             Wrap(
               spacing: 12,
@@ -401,7 +459,7 @@ class ActiveShiftCard extends StatelessWidget {
   final Map<String, dynamic> shift;
   final VoidCallback onChanged;
 
-  Future<void> startBreak(BuildContext context) async {
+  Future<void> startBreak(BuildContext context, String breakType) async {
     final summary = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (_) => ShiftSummaryDialog(shift: shift),
@@ -410,7 +468,7 @@ class ActiveShiftCard extends StatelessWidget {
     await api.request('PATCH', '/shifts/${shift['id']}', body: summary);
     if (!context.mounted) return;
     final result = await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => BreakGuidePage(api: api, shift: {...shift, ...summary})),
+      MaterialPageRoute(builder: (_) => BreakGuidePage(api: api, shift: {...shift, ...summary}, breakType: breakType)),
     );
     if (result != null) onChanged();
   }
@@ -436,11 +494,22 @@ class ActiveShiftCard extends StatelessWidget {
             const SizedBox(height: 10),
             Text(shift['break_status']['message'], style: const TextStyle(color: Color(0xfffdb022))),
             const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: activeBreak == null ? () => startBreak(context) : () => endBreak(activeBreak['id'] as int),
-              icon: Icon(activeBreak == null ? Icons.free_breakfast_outlined : Icons.timer_off_outlined),
-              label: Text(activeBreak == null ? 'Find Break Zone' : 'End Active Break'),
-            ),
+            if (activeBreak == null)
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(onPressed: () => startBreak(context, 'rest'), icon: const Icon(Icons.free_breakfast_outlined), label: const Text('Start Break')),
+                  OutlinedButton.icon(onPressed: () => startBreak(context, 'lunch'), icon: const Icon(Icons.lunch_dining), label: const Text('Lunch')),
+                  OutlinedButton.icon(onPressed: () => startBreak(context, 'emergency'), icon: const Icon(Icons.emergency_outlined), label: const Text('Emergency')),
+                ],
+              )
+            else
+              OutlinedButton.icon(
+                onPressed: () => endBreak(activeBreak['id'] as int),
+                icon: const Icon(Icons.timer_off_outlined),
+                label: const Text('End Active Break'),
+              ),
           ],
         ),
       ),
@@ -531,6 +600,8 @@ class _ShiftFormPageState extends State<ShiftFormPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (widget.endMode && widget.shift != null) FinalTallyCard(shift: widget.shift!),
+          if (widget.endMode) const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: platform,
             items: platforms.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
@@ -549,6 +620,33 @@ class _ShiftFormPageState extends State<ShiftFormPage> {
           const SizedBox(height: 18),
           FilledButton(onPressed: busy ? null : save, style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)), child: Text(busy ? 'Saving...' : 'Save')),
         ],
+      ),
+    );
+  }
+}
+
+class FinalTallyCard extends StatelessWidget {
+  const FinalTallyCard({super.key, required this.shift});
+  final Map<String, dynamic> shift;
+
+  @override
+  Widget build(BuildContext context) {
+    final metrics = shift['metrics'] as Map<String, dynamic>;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Final tally preview', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            ReportRow('Gross', money(shift['gross_earnings'])),
+            ReportRow('Trips', shift['trips'].toString()),
+            ReportRow('Miles', parse(shift['miles']).toStringAsFixed(1)),
+            ReportRow('Net hourly', money(metrics['net_hourly'])),
+            ReportRow('Net profit', money(metrics['net_profit'])),
+          ],
+        ),
       ),
     );
   }
@@ -624,9 +722,10 @@ class _ShiftSummaryDialogState extends State<ShiftSummaryDialog> {
 }
 
 class BreakGuidePage extends StatefulWidget {
-  const BreakGuidePage({super.key, required this.api, required this.shift});
+  const BreakGuidePage({super.key, required this.api, required this.shift, required this.breakType});
   final ApiClient api;
   final Map<String, dynamic> shift;
+  final String breakType;
 
   @override
   State<BreakGuidePage> createState() => _BreakGuidePageState();
@@ -665,7 +764,7 @@ class _BreakGuidePageState extends State<BreakGuidePage> {
   Future<void> confirmBreak(Map<String, dynamic> zone) async {
     final here = await currentLocation();
     await widget.api.request('POST', '/shifts/${widget.shift['id']}/breaks/start', body: {
-      'break_type': 'rest',
+      'break_type': widget.breakType,
       'location_name': zone['name'],
       'latitude': here.lat,
       'longitude': here.lon,
@@ -692,6 +791,10 @@ class _BreakGuidePageState extends State<BreakGuidePage> {
                 const SizedBox(height: 10),
                 ...zones.map((zone) => ZoneTile(zone: zone as Map<String, dynamic>, onConfirm: () => confirmBreak(zone))),
                 if (zones.isEmpty) const Text('No 24-hour break locations found nearby. Try refreshing after moving closer to a commercial area.'),
+                const SizedBox(height: 16),
+                Text('Hot zone places', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 10),
+                ...hotspots.map((hotspot) => HotspotTile(hotspot: hotspot as Map<String, dynamic>)),
               ],
             ),
     );
@@ -751,6 +854,10 @@ class _ZonesPageState extends State<ZonesPage> {
           Text('24-hour break spots', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 10),
           ...zones.map((zone) => ZoneTile(zone: zone as Map<String, dynamic>, onConfirm: null)),
+          const SizedBox(height: 16),
+          Text('Hot zone places', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 10),
+          ...hotspots.map((hotspot) => HotspotTile(hotspot: hotspot as Map<String, dynamic>)),
         ],
       ),
     );
@@ -839,6 +946,23 @@ class ZoneTile extends StatelessWidget {
         subtitle: Text('${zone['distance_miles']} mi - ${zone['kind']} ${zone['open_24_7'] == true ? '- 24/7' : ''}'),
         trailing: onConfirm == null ? const Icon(Icons.chevron_right) : FilledButton(onPressed: onConfirm, child: const Text("I'm here")),
         onTap: () => html.window.open('https://www.openstreetmap.org/?mlat=${zone['latitude']}&mlon=${zone['longitude']}#map=17/${zone['latitude']}/${zone['longitude']}', '_blank'),
+      ),
+    );
+  }
+}
+
+class HotspotTile extends StatelessWidget {
+  const HotspotTile({super.key, required this.hotspot});
+  final Map<String, dynamic> hotspot;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: ListTile(
+        leading: const Icon(Icons.local_fire_department_outlined, color: Color(0xfffdb022)),
+        title: Text(hotspot['label']?.toString() ?? 'Activity cluster'),
+        subtitle: Text('${hotspot['distance_miles']} mi - density score ${hotspot['score']}'),
       ),
     );
   }
@@ -934,9 +1058,10 @@ class _WeeklyPageState extends State<WeeklyPage> {
 }
 
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, required this.user, required this.onLogout});
+  const SettingsPage({super.key, required this.user, required this.onLogout, required this.api});
   final Map<String, dynamic> user;
   final VoidCallback onLogout;
+  final ApiClient api;
 
   @override
   Widget build(BuildContext context) {
@@ -954,6 +1079,16 @@ class SettingsPage extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Card(
+            child: ListTile(
+              leading: const Icon(Icons.directions_car_outlined),
+              title: const Text('Vehicle profile'),
+              subtitle: const Text('Pick one active vehicle for MPG and gas-cost estimates.'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => VehicleSetupPage(api: api))),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
             child: const ListTile(
               leading: Icon(Icons.lock_outline),
               title: Text('Privacy first'),
@@ -963,6 +1098,130 @@ class SettingsPage extends StatelessWidget {
           const SizedBox(height: 18),
           OutlinedButton.icon(onPressed: onLogout, icon: const Icon(Icons.logout), label: const Text('Logout')),
         ],
+      ),
+    );
+  }
+}
+
+class VehicleSetupPage extends StatefulWidget {
+  const VehicleSetupPage({super.key, required this.api});
+  final ApiClient api;
+
+  @override
+  State<VehicleSetupPage> createState() => _VehicleSetupPageState();
+}
+
+class _VehicleSetupPageState extends State<VehicleSetupPage> {
+  List<dynamic> catalog = [];
+  List<dynamic> vehicles = [];
+  Map<String, dynamic>? selected;
+  final fuelPrice = TextEditingController(text: '3.50');
+  bool loading = true;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  @override
+  void dispose() {
+    fuelPrice.dispose();
+    super.dispose();
+  }
+
+  Future<void> load() async {
+    try {
+      catalog = await widget.api.request('GET', '/vehicles/catalog') as List<dynamic>;
+      vehicles = await widget.api.request('GET', '/vehicles') as List<dynamic>;
+      selected = catalog.isNotEmpty ? catalog.first as Map<String, dynamic> : null;
+      error = null;
+    } catch (err) {
+      error = err.toString().replaceFirst('Exception: ', '');
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> saveVehicle() async {
+    if (selected == null) return;
+    final vehicle = await widget.api.request('POST', '/vehicles', body: {
+      'catalog_id': selected!['id'],
+      'nickname': '${selected!['make']} ${selected!['model']}',
+      'fuel_price_per_gallon': parse(fuelPrice.text),
+      'is_active': true,
+    }) as Map<String, dynamic>;
+    if (mounted) Navigator.of(context).pop(vehicle);
+  }
+
+  Future<void> activate(Map<String, dynamic> vehicle) async {
+    final active = await widget.api.request('PATCH', '/vehicles/${vehicle['id']}/active') as Map<String, dynamic>;
+    if (mounted) Navigator.of(context).pop(active);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Vehicle Profile')),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                Text('Active vehicle', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 8),
+                if (vehicles.isEmpty) const Text('Add your vehicle before going on shift so GigOS can estimate fuel cost from MPG.'),
+                ...vehicles.map((item) {
+                  final vehicle = item as Map<String, dynamic>;
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: ListTile(
+                      leading: Icon(vehicle['is_active'] == true ? Icons.check_circle : Icons.radio_button_unchecked, color: const Color(0xff32d583)),
+                      title: Text('${vehicle['year']} ${vehicle['make']} ${vehicle['model']}'),
+                      subtitle: Text('${vehicle['mpg_combined']} MPG combined - \$${vehicle['fuel_price_per_gallon']}/gal'),
+                      trailing: vehicle['is_active'] == true ? const Text('Active') : TextButton(onPressed: () => activate(vehicle), child: const Text('Use')),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 18),
+                Text('Add common vehicle', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<Map<String, dynamic>>(
+                  value: selected,
+                  items: catalog.map((item) {
+                    final car = item as Map<String, dynamic>;
+                    return DropdownMenuItem<Map<String, dynamic>>(
+                      value: car,
+                      child: Text('${car['year']} ${car['make']} ${car['model']} - ${car['mpg_combined']} MPG'),
+                    );
+                  }).toList(),
+                  onChanged: (value) => setState(() => selected = value),
+                  decoration: const InputDecoration(labelText: 'Vehicle'),
+                ),
+                const SizedBox(height: 12),
+                TextField(controller: fuelPrice, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Fuel price per gallon')),
+                const SizedBox(height: 18),
+                FilledButton.icon(onPressed: saveVehicle, icon: const Icon(Icons.directions_car), label: const Text('Save as Active Vehicle')),
+              ],
+            ),
+    );
+  }
+}
+
+class SetupPromptCard extends StatelessWidget {
+  const SetupPromptCard({super.key, required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.directions_car, color: Color(0xff32d583)),
+        title: const Text('Add your vehicle'),
+        subtitle: const Text('Set MPG once so shifts can estimate fuel cost automatically.'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: onTap,
       ),
     );
   }

@@ -33,6 +33,51 @@ class Token(BaseModel):
     user: UserRead
 
 
+class VehicleCatalogRead(BaseModel):
+    id: int
+    year: int
+    make: str
+    model: str
+    mpg_city: Decimal
+    mpg_highway: Decimal
+    mpg_combined: Decimal
+    fuel_type: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserVehicleCreate(BaseModel):
+    catalog_id: int | None = None
+    nickname: str | None = None
+    year: int | None = Field(default=None, ge=1980, le=2035)
+    make: str | None = None
+    model: str | None = None
+    mpg_city: Decimal | None = Field(default=None, gt=0)
+    mpg_highway: Decimal | None = Field(default=None, gt=0)
+    mpg_combined: Decimal | None = Field(default=None, gt=0)
+    fuel_type: str = "gasoline"
+    fuel_price_per_gallon: Decimal = Field(default=Decimal("3.50"), gt=0)
+    is_active: bool = True
+
+
+class UserVehicleRead(BaseModel):
+    id: int
+    user_id: int
+    catalog_id: int | None
+    nickname: str | None
+    year: int
+    make: str
+    model: str
+    mpg_city: Decimal
+    mpg_highway: Decimal
+    mpg_combined: Decimal
+    fuel_type: str
+    fuel_price_per_gallon: Decimal
+    is_active: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ShiftStart(BaseModel):
     platform: Platform
     started_at: datetime | None = None
@@ -114,6 +159,7 @@ class BreakStatus(BaseModel):
 class ShiftRead(BaseModel):
     id: int
     user_id: int
+    vehicle_id: int | None = None
     started_at: datetime
     ended_at: datetime | None
     platform: str
@@ -130,6 +176,7 @@ class ShiftRead(BaseModel):
     breaks: list[BreakRead] = []
     metrics: ShiftMetrics
     break_status: BreakStatus
+    estimated_fuel_cost: Decimal | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

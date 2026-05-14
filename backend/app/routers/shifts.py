@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.calculations import break_status, metrics, total_minutes
 from app.database import get_db
 from app.geo import miles_between
-from app.models import Break, Shift, User
+from app.models import Break, Shift, User, UserVehicle
 from app.schemas import BreakEnd, BreakRead, BreakStart, ShiftCreate, ShiftEnd, ShiftRead, ShiftStart, ShiftUpdate
 from app.security import get_current_user
 
@@ -43,6 +43,7 @@ def serialize_shift(shift: Shift) -> ShiftRead:
     return ShiftRead(
         id=shift.id,
         user_id=shift.user_id,
+        vehicle_id=shift.vehicle_id,
         started_at=shift.started_at,
         ended_at=shift.ended_at,
         platform=shift.platform,
@@ -59,6 +60,7 @@ def serialize_shift(shift: Shift) -> ShiftRead:
         breaks=[BreakRead.model_validate(item) for item in shift.breaks],
         metrics=calc,
         break_status=status_payload,
+        estimated_fuel_cost=shift.gas_cost,
     )
 
 
@@ -69,6 +71,7 @@ def start_shift(payload: ShiftStart, db: Session = Depends(get_db), current_user
         raise HTTPException(status_code=409, detail="You already have an active shift")
     shift = Shift(
         user_id=current_user.id,
+        vehicle_id=active_vehicle_id(db, current_user.id),
         started_at=payload.started_at or now_utc(),
         platform=payload.platform.value,
         notes=payload.notes,
@@ -84,6 +87,7 @@ def create_shift(payload: ShiftCreate, db: Session = Depends(get_db), current_us
     data = payload.model_dump(exclude_unset=True)
     data["platform"] = payload.platform.value
     shift = Shift(user_id=current_user.id, **data)
+    shift.vehicle_id = active_vehicle_id(db, current_user.id)
     db.add(shift)
     db.commit()
     db.refresh(shift)
@@ -98,6 +102,7 @@ def end_shift(shift_id: int, payload: ShiftEnd, db: Session = Depends(get_db), c
         if field == "platform" and value is not None:
             value = value.value
         setattr(shift, field, value)
+    apply_vehicle_gas_estimate(db, shift)
     if shift.ended_at is None:
         shift.ended_at = now_utc()
     shift.updated_at = now_utc()
@@ -114,6 +119,7 @@ def update_shift(shift_id: int, payload: ShiftUpdate, db: Session = Depends(get_
         if field == "platform" and value is not None:
             value = value.value
         setattr(shift, field, value)
+    apply_vehicle_gas_estimate(db, shift)
     shift.updated_at = now_utc()
     db.commit()
     db.refresh(shift)
@@ -176,6 +182,19 @@ def start_break(shift_id: int, payload: BreakStart, db: Session = Depends(get_db
     db.commit()
     db.refresh(break_item)
     return break_item
+
+
+def active_vehicle_id(db: Session, user_id: int) -> int | None:
+    return db.scalar(select(UserVehicle.id).where(UserVehicle.user_id == user_id, UserVehicle.is_active.is_(True)))
+
+
+def apply_vehicle_gas_estimate(db: Session, shift: Shift) -> None:
+    if shift.gas_cost and shift.gas_cost > 0:
+        return
+    vehicle = db.get(UserVehicle, shift.vehicle_id) if shift.vehicle_id else None
+    if vehicle is None or not shift.miles:
+        return
+    shift.gas_cost = (shift.miles / vehicle.mpg_combined) * vehicle.fuel_price_per_gallon
 
 
 @router.patch("/breaks/{break_id}/end", response_model=BreakRead)

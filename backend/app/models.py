@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -21,6 +21,7 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
     shifts: Mapped[list["Shift"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    vehicles: Mapped[list["UserVehicle"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Shift(Base):
@@ -28,6 +29,7 @@ class Shift(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("user_vehicles.id", ondelete="SET NULL"), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -43,6 +45,7 @@ class Shift(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="shifts")
+    vehicle: Mapped["UserVehicle | None"] = relationship(back_populates="shifts")
     breaks: Mapped[list["Break"]] = relationship(back_populates="shift", cascade="all, delete-orphan")
     expenses: Mapped[list["Expense"]] = relationship(back_populates="shift", cascade="all, delete-orphan")
     platform_entries: Mapped[list["PlatformEntry"]] = relationship(back_populates="shift", cascade="all, delete-orphan")
@@ -90,3 +93,42 @@ class PlatformEntry(Base):
     miles: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=Decimal("0.00"), nullable=False)
 
     shift: Mapped[Shift] = relationship(back_populates="platform_entries")
+
+
+class VehicleCatalog(Base):
+    __tablename__ = "vehicle_catalog"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    make: Mapped[str] = mapped_column(String(80), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    mpg_city: Mapped[Decimal] = mapped_column(Numeric(5, 1), nullable=False)
+    mpg_highway: Mapped[Decimal] = mapped_column(Numeric(5, 1), nullable=False)
+    mpg_combined: Mapped[Decimal] = mapped_column(Numeric(5, 1), nullable=False)
+    fuel_type: Mapped[str] = mapped_column(String(40), default="gasoline", nullable=False)
+
+    user_vehicles: Mapped[list["UserVehicle"]] = relationship(back_populates="catalog")
+
+
+class UserVehicle(Base):
+    __tablename__ = "user_vehicles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    catalog_id: Mapped[int | None] = mapped_column(ForeignKey("vehicle_catalog.id", ondelete="SET NULL"), nullable=True)
+    nickname: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    make: Mapped[str] = mapped_column(String(80), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    mpg_city: Mapped[Decimal] = mapped_column(Numeric(5, 1), nullable=False)
+    mpg_highway: Mapped[Decimal] = mapped_column(Numeric(5, 1), nullable=False)
+    mpg_combined: Mapped[Decimal] = mapped_column(Numeric(5, 1), nullable=False)
+    fuel_type: Mapped[str] = mapped_column(String(40), default="gasoline", nullable=False)
+    fuel_price_per_gallon: Mapped[Decimal] = mapped_column(Numeric(6, 2), default=Decimal("3.50"), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="vehicles")
+    catalog: Mapped[VehicleCatalog | None] = relationship(back_populates="user_vehicles")
+    shifts: Mapped[list[Shift]] = relationship(back_populates="vehicle")
