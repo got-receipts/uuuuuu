@@ -1,6 +1,6 @@
 # GigOS
 
-GigOS is a production-ready MVP for independent gig-worker shift tracking. It does **not** connect to Uber, DoorDash, Grubhub, Instacart, Amazon Flex, or any third-party gig platform API.
+GigOS is a production-ready MVP for independent gig-worker shift tracking. It does not connect to Uber, DoorDash, Grubhub, Instacart, Amazon Flex, or any third-party gig platform API.
 
 > GigOS is an independent shift, mileage, break, and earnings tracker for gig workers. Not affiliated with Uber, DoorDash, Grubhub, Instacart, Amazon Flex, or any delivery platform.
 
@@ -18,41 +18,34 @@ GigOS is a production-ready MVP for independent gig-worker shift tracking. It do
 
 ```text
 .
-├── backend
-│   ├── alembic
-│   ├── app
-│   │   ├── routers
-│   │   ├── calculations.py
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   ├── main.py
-│   │   ├── models.py
-│   │   ├── schemas.py
-│   │   └── security.py
-│   ├── tests
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend
-│   ├── lib
-│   ├── web
-│   └── Dockerfile
-├── docker-compose.yml
-├── Dockerfile
-├── railway.json
-└── .env.example
+|-- backend
+|   |-- alembic
+|   |-- app
+|   |   |-- routers
+|   |   |-- calculations.py
+|   |   |-- config.py
+|   |   |-- database.py
+|   |   |-- main.py
+|   |   |-- models.py
+|   |   |-- schemas.py
+|   |   `-- security.py
+|   |-- tests
+|   |-- Dockerfile
+|   `-- requirements.txt
+|-- frontend
+|   |-- lib
+|   |-- web
+|   `-- Dockerfile
+|-- docker-compose.yml
+|-- Dockerfile
+|-- railway.json
+`-- .env.example
 ```
 
 ## Local Development
 
-Copy the example environment file if you want local overrides:
-
 ```bash
 cp .env.example .env
-```
-
-Run the full stack:
-
-```bash
 docker compose up --build
 ```
 
@@ -63,8 +56,6 @@ Services:
 - API docs: http://localhost:8000/docs
 - PostgreSQL: localhost:5432
 - Health: http://localhost:8000/health
-
-The backend service runs `alembic upgrade head` automatically before starting.
 
 ## Railway Deployment
 
@@ -85,7 +76,7 @@ The root Dockerfile builds Flutter Web to `build/web`, copies it into the FastAP
 
 ## iPhone PWA Install
 
-This repo is currently set up for the fastest iPhone path: install the Railway-hosted Flutter Web app as a Safari PWA.
+This repo is set up for the fastest iPhone path: install the Railway-hosted Flutter Web app as a Safari PWA.
 
 1. Deploy GigOS to Railway.
 2. Open the Railway app URL in Safari on the iPhone.
@@ -94,12 +85,6 @@ This repo is currently set up for the fastest iPhone path: install the Railway-h
 5. Launch GigOS from the new home-screen icon.
 
 The frontend includes a web manifest, Apple mobile web app tags, theme color, and app icons. Location features require HTTPS, which Railway provides on deployed services.
-
-If you deploy frontend and backend as separate services later, build `frontend/Dockerfile` with:
-
-```text
-API_BASE_URL=https://your-backend-domain
-```
 
 ## API Routes
 
@@ -117,6 +102,8 @@ API_BASE_URL=https://your-backend-domain
 - `PATCH /breaks/{id}/end`
 - `GET /reports/weekly`
 - `GET /export/csv`
+- `GET /locations/break-zones`
+- `GET /locations/activity`
 - `GET /health`
 
 ## Calculation Rules
@@ -129,7 +116,7 @@ API_BASE_URL=https://your-backend-domain
 - `net_hourly = net_profit / hours`
 - `earnings_per_mile = gross_earnings / miles`
 
-Break companion thresholds:
+Break companion:
 
 - Every 80 minutes: prompt for a geo-confirmed break
 - 8 hours: fatigue warning
@@ -150,7 +137,7 @@ Location intelligence:
 
 ## Tests
 
-Run backend tests locally:
+Backend:
 
 ```bash
 cd backend
@@ -158,7 +145,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Flutter checks:
+Flutter Web:
 
 ```bash
 cd frontend
